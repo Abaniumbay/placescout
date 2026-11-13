@@ -1,0 +1,27 @@
+# PlaceScout as a long-running service. Copy this file and an optional .env
+# (GEOAPIFY_API_KEY, PLACESCOUT_CONTACT, PLACESCOUT_TAG) next to each other and
+# run `docker compose up -d`.
+#
+# Listens on localhost for apps on the host and on docker0 (172.17.0.1) for
+# other containers (reach it as http://host.docker.internal:8095 with
+# extra_hosts: host.docker.internal:host-gateway). Never on the LAN or the
+# internet: it fetches URLs it is given, so it must only take trusted callers.
+services:
+  placescout:
+    image: ghcr.io/abaniumbay/placescout:${PLACESCOUT_TAG:-0.1.0}
+    container_name: placescout
+    restart: unless-stopped
+    environment:
+      GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+      PLACESCOUT_CONTACT: ${PLACESCOUT_CONTACT:-}
+    ports:
+      - "127.0.0.1:${PLACESCOUT_PORT:-8095}:8000"
+      - "172.17.0.1:${PLACESCOUT_PORT:-8095}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
