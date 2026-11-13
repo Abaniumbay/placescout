@@ -125,5 +125,7 @@ def test_discovered_links_skip_duplicates_and_the_page_itself():
 def test_tdm_reservation_in_header_or_meta_is_respected():
     assert tdm_reserved("<html></html>", {"tdm-reservation": "1"}) is True
     assert tdm_reserved('<meta name="tdm-reservation" content="1">', {}) is True
+    assert tdm_reserved('<meta content="1" name="tdm-reservation">', {}) is True
+    assert tdm_reserved("<meta NAME='TDM-Reservation' content=' 1 '>", {}) is True
     assert tdm_reserved('<meta name="tdm-reservation" content="0">', {}) is False
     assert tdm_reserved("<html></html>", {}) is False

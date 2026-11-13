@@ -224,7 +224,7 @@ def discover_links(html: str, page_url: str, limit: int) -> list[str]:
 def discover_pages(html: str, page_url: str, limit: int) -> list[tuple[str, str]]:
     try:
         root = lxml.html.fromstring(html)
-    except (lxml.etree.ParserError, ValueError):
+    except lxml.etree.ParserError, ValueError:
         return []
     host = _bare_host(page_url)
     home = urldefrag(page_url).url
@@ -266,8 +266,14 @@ def tdm_reserved(html: str, headers: dict[str, str]) -> bool:
     meta tag), which the EU exception we rely on requires us to honour."""
     if any(k.lower() == "tdm-reservation" and v.strip() == "1" for k, v in headers.items()):
         return True
-    return bool(
-        re.search(r"<meta[^>]+name=[\"']tdm-reservation[\"'][^>]+content=[\"']1[\"']", html, re.I)
+    try:
+        root = lxml.html.fromstring(html)
+    except lxml.etree.ParserError, ValueError:
+        return False
+    return any(
+        (meta.get("name") or "").strip().lower() == "tdm-reservation"
+        and (meta.get("content") or "").strip() == "1"
+        for meta in root.iter("meta")
     )
 
 

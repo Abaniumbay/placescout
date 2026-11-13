@@ -17,7 +17,7 @@ class Settings:
     max_document_chars: int = 20_000
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         return cls(
             geoapify_api_key=os.environ.get("GEOAPIFY_API_KEY") or None,
             contact=os.environ.get("PLACESCOUT_CONTACT") or None,

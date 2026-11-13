@@ -28,6 +28,13 @@ class FetchError(Exception):
     pass
 
 
+class Disallowed(FetchError):
+    """robots.txt does not let PlaceScoutBot read this URL."""
+
+    def __init__(self) -> None:
+        super().__init__("robots.txt")
+
+
 @dataclass
 class Page:
     url: str
@@ -80,21 +87,25 @@ class Fetcher:
 
     async def _read_robots(self, origin: str) -> Protego | bool:
         try:
-            async with self._get(f"{origin}/robots.txt") as response:
+            async with self._get(f"{origin}/robots.txt", robots=False) as response:
                 if 400 <= response.status_code < 500:
                     return True
                 if response.status_code != 200:
                     return False
                 body = await _read(response, MAX_ROBOTS_BYTES, truncate=True)
                 return Protego.parse(body.decode("utf-8", errors="replace"))
-        except (FetchError, httpx.HTTPError):
+        except FetchError, httpx.HTTPError:
             return False
 
     @asynccontextmanager
-    async def _get(self, url: str) -> AsyncIterator[httpx.Response]:
-        """Follows up to MAX_REDIRECTS redirects, checking every hop."""
+    async def _get(self, url: str, robots: bool = True) -> AsyncIterator[httpx.Response]:
+        """Follows up to MAX_REDIRECTS redirects. Every hop must be a public
+        address and, unless this is robots.txt itself, allowed by its site's
+        robots.txt: a redirect must not lead the bot where it may not go."""
         for _ in range(MAX_REDIRECTS + 1):
             await self.check(url)
+            if robots and not await self.robots_allows(url):
+                raise Disallowed()
             response = await self._client.send(self._client.build_request("GET", url), stream=True)
             if not response.is_redirect:
                 try:

@@ -228,3 +228,15 @@ async def test_every_request_identifies_our_bot():
 @pytest.mark.parametrize("params", [{}, {"near": "Paris"}])
 async def test_needs_a_name_website_or_wikidata_id(params):
     assert (await get(params)).status_code == 422
+
+
+@respx.mock
+async def test_a_linked_page_that_reserves_text_and_data_mining_is_not_returned():
+    mock_everything()
+    respx.get(f"{SITE}menu").respond(
+        200, html=PAGE.format(title="Menu", body="Our menu."), headers={"tdm-reservation": "1"}
+    )
+
+    body = (await get({"name": "Bistro Example"})).json()
+
+    assert [d["kind"] for d in body["documents"]] == ["home", "hours"]

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from placescout import geoapify, wikimedia
-from placescout.fetch import Fetcher, FetchError
+from placescout.fetch import Disallowed, Fetcher, FetchError
 from placescout.models import (
     Document,
     Fact,
@@ -171,9 +171,10 @@ async def _commons(client: httpx.AsyncClient, file_name: str):
 
 
 async def _website(fetcher: Fetcher, url: str, settings: Settings) -> Found:
-    if not await fetcher.robots_allows(url):
-        raise Skipped("robots.txt")
-    home = await fetcher.get_html(url)
+    try:
+        home = await fetcher.get_html(url)
+    except Disallowed as disallowed:
+        raise Skipped(str(disallowed)) from disallowed
     if tdm_reserved(home.html, home.headers):
         raise Skipped("tdm-reservation")
 
@@ -187,11 +188,11 @@ async def _website(fetcher: Fetcher, url: str, settings: Settings) -> Found:
     more = list(pages.items())[: settings.max_pages_per_site - 1]
 
     async def read(page_url: str, kind: str) -> Document | None:
-        if not await fetcher.robots_allows(page_url):
-            return None
         try:
             page = await fetcher.get_html(page_url)
-        except (FetchError, httpx.HTTPError):
+        except FetchError, httpx.HTTPError:
+            return None
+        if tdm_reserved(page.html, page.headers):
             return None
         return page_text(page.html, page.url, kind, settings.max_document_chars)
 
