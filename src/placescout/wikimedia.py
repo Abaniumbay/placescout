@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import lxml.html
 
+from placescout.geo import metres_between
 from placescout.models import Photo
 
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
@@ -13,10 +14,93 @@ COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 PHOTO_WIDTH = 1280
 
 
+# Wikidata classes (P31) of stops: a station named after a park is not the
+# park, and its sign is not the park's photo.
+TRANSPORT_STOPS = {
+    "Q55488",  # railway station
+    "Q1793804",  # station building
+    "Q22808403",  # underground station
+    "Q928830",  # metro station
+    "Q953806",  # bus stop
+    "Q2175765",  # tram stop
+    "Q719456",  # station
+    "Q18543139",  # central station
+    "Q1339195",  # station building
+}
+
+
 @dataclass
 class Entity:
     image_file: str | None = None
     website: str | None = None
+    transport_stop: bool = False
+
+
+@dataclass
+class Nearby:
+    """A Wikidata item found by name, and how far it is from the anchor."""
+
+    qid: str
+    label: str | None
+    metres: float
+    entity: Entity
+
+
+def search_params(name: str) -> dict:
+    return {
+        "action": "wbsearchentities",
+        "search": name,
+        "language": "en",
+        "uselang": "en",
+        "type": "item",
+        "limit": 7,
+        "format": "json",
+    }
+
+
+def search_ids(data: dict) -> list[str]:
+    return [hit["id"] for hit in data.get("search") or [] if isinstance(hit.get("id"), str)]
+
+
+def entities_params(qids: list[str]) -> dict:
+    return {
+        "action": "wbgetentities",
+        "ids": "|".join(qids),
+        "props": "claims|labels",
+        "languages": "en",
+        "format": "json",
+    }
+
+
+def nearest_entity(
+    data: dict, qids: list[str], anchor: tuple[float, float], max_metres: float
+) -> Nearby | None:
+    """The candidate closest to the anchor, if any is within reach. A name
+    alone is not enough: a same-named place in another city must not match."""
+    entities = data.get("entities") or {}
+    best: Nearby | None = None
+    for qid in qids:
+        item = entities.get(qid) or {}
+        point = _coordinates(item.get("claims") or {})
+        if point is None:
+            continue
+        metres = metres_between(anchor, point)
+        entity = map_entity({"entities": {qid: item}}, qid)
+        if entity.transport_stop:
+            continue
+        if metres <= max_metres and (best is None or metres < best.metres):
+            label = ((item.get("labels") or {}).get("en") or {}).get("value")
+            best = Nearby(qid, label, metres, entity)
+    return best
+
+
+def _coordinates(claims: dict) -> tuple[float, float] | None:
+    for claim in claims.get("P625") or []:
+        value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}
+        lat, lon = value.get("latitude"), value.get("longitude")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            return (lat, lon)
+    return None
 
 
 def entity_params(qid: str) -> dict:
@@ -36,7 +120,16 @@ def imageinfo_params(file_name: str) -> dict:
 
 def map_entity(data: dict, qid: str) -> Entity:
     claims = ((data.get("entities") or {}).get(qid) or {}).get("claims") or {}
-    return Entity(image_file=_first(claims, "P18"), website=_first(claims, "P856"))
+    classes = {
+        ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value", {}).get("id")
+        for c in claims.get("P31") or []
+        if isinstance(((c.get("mainsnak") or {}).get("datavalue") or {}).get("value"), dict)
+    }
+    return Entity(
+        image_file=_first(claims, "P18"),
+        website=_first(claims, "P856"),
+        transport_stop=bool(classes & TRANSPORT_STOPS),
+    )
 
 
 def _first(claims: dict, prop: str) -> str | None:

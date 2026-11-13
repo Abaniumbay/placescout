@@ -8,7 +8,7 @@
 # internet: it fetches URLs it is given, so it must only take trusted callers.
 services:
   placescout:
-    image: ghcr.io/abaniumbay/placescout:${PLACESCOUT_TAG:-0.1.0}
+    image: ghcr.io/abaniumbay/placescout:${PLACESCOUT_TAG:-0.2.0}
     container_name: placescout
     restart: unless-stopped
     environment:

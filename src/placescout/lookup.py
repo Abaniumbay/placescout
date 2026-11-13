@@ -6,7 +6,7 @@ Every source is best-effort: a source that fails or opts out is reported in
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import httpx
 
@@ -58,13 +58,23 @@ async def lookup(
 
     if not settings.geoapify_api_key:
         reports.append(SourceReport(name="geoapify", status="not_configured"))
-    elif query.name:
-        match, place = await _run(
+    name = geoapify.clean_name(query.name) if query.name else ""
+    anchor: tuple[tuple[float, float], float] | None = (
+        ((query.lat, query.lon), geoapify.NEAR_VENUE_METRES)
+        if query.lat is not None and query.lon is not None
+        else None
+    )
+
+    if not settings.geoapify_api_key:
+        reports.append(SourceReport(name="geoapify", status="not_configured"))
+    elif name:
+        match, place, found_anchor = await _run(
             reports,
             "geoapify",
-            _geoapify(query, client, settings.geoapify_api_key),
+            _geoapify(query, name, client, settings.geoapify_api_key),
             found=lambda value: value[1] is not None,
-        ) or (match, None)
+        ) or (match, None, None)
+        anchor = anchor or found_anchor
         if place:
             ids.osm = place.osm
             ids.wikidata = ids.wikidata or place.wikidata
@@ -73,8 +83,19 @@ async def lookup(
     entity = None
     if ids.wikidata:
         entity = await _run(reports, "wikidata", _wikidata(client, ids.wikidata))
-        if entity:
-            ids.website = ids.website or entity.website
+        if entity and entity.transport_stop and place and not query.wikidata:
+            # Geoapify matched the stop named after the place ("Champ de Mars
+            # - Tour Eiffel" station for the Champ de Mars): not the place.
+            log.info("lookup.dropped_transport_stop wikidata=%s osm=%s", ids.wikidata, ids.osm)
+            place, entity, match = None, None, Match(confidence="ambiguous")
+            ids = Ids(website=query.website, wikidata=query.wikidata)
+    if not entity and not ids.wikidata and name and anchor:
+        nearby = await _run_nearby(reports, client, _search_terms(name, query.near), anchor)
+        if nearby:
+            ids.wikidata = nearby.qid
+            entity = nearby.entity
+    if entity:
+        ids.website = ids.website or entity.website
 
     commons, site = await asyncio.gather(
         _run(reports, "commons", _commons(client, entity.image_file))
@@ -141,21 +162,95 @@ async def _run(reports: list[SourceReport], name: str, step, found=lambda v: v i
     return value
 
 
-async def _geoapify(query: Query, client: httpx.AsyncClient, key: str):
-    params = geoapify.search_params(query.name, query.near, query.lat, query.lon)
-    search = await client.get(
-        f"{geoapify.BASE}/v1/geocode/search", params={**params, "apiKey": key}
-    )
-    search.raise_for_status()
-    found = geoapify.pick_match(search.json())
+async def _geoapify(query: Query, name: str, client: httpx.AsyncClient, key: str):
+    """Searches the name with its location; when that is not one place and
+    the location names a venue of its own, searches the location alone."""
+    words = geoapify.query_words(name, query.near)
+    found = await _search(client, key, name, query.near, query.lat, query.lon, words)
+    if (
+        found.confidence != "single"
+        and query.near
+        and not geoapify.RELATIVE_LOCATION.search(query.near)
+    ):
+        alone = await _search(
+            client, key, geoapify.clean_name(query.near), None, query.lat, query.lon, words
+        )
+        if alone.confidence == "single":
+            found = alone
+        elif alone.anchor is not None:
+            # The location alone says better where to look than the name with
+            # it ("Inside Notre-Dame, …" found a street in Belgium).
+            found = replace(found, anchor=alone.anchor, reach_metres=alone.reach_metres)
+    anchor = (found.anchor, found.reach_metres) if found.anchor else None
     match = Match(confidence=found.confidence, name=found.name)
     if found.confidence != "single":
-        return match, None
+        return match, None, anchor
     details = await client.get(
-        f"{geoapify.BASE}/v2/place-details", params={"id": found.place_id, "apiKey": key}
+        f"{geoapify.BASE}/v2/place-details",
+        params={"id": found.place_id, "apiKey": key},
+        timeout=geoapify.TIMEOUT_SECONDS,
     )
     details.raise_for_status()
-    return match, geoapify.map_details(details.json())
+    return match, geoapify.map_details(details.json()), anchor
+
+
+async def _search(client, key, name, near, lat, lon, words) -> geoapify.SearchMatch:
+    params = {**geoapify.search_params(name, near, lat, lon), "apiKey": key}
+    url = f"{geoapify.BASE}/v1/geocode/search"
+    try:
+        search = await client.get(url, params=params, timeout=geoapify.TIMEOUT_SECONDS)
+    except httpx.TimeoutException:
+        # Geoapify is sometimes slow for a moment; one more try, then give up.
+        search = await client.get(url, params=params, timeout=geoapify.TIMEOUT_SECONDS)
+    search.raise_for_status()
+    return geoapify.pick_match(search.json(), words)
+
+
+def _search_terms(name: str, near: str | None) -> list[str]:
+    """The name, then the location's first part when it names a venue
+    ("Champ de Mars, Paris" for "Champ de Mars & Eiffel Tower")."""
+    terms = [name]
+    if near and not geoapify.RELATIVE_LOCATION.search(near):
+        first = geoapify.clean_name(near.split(",")[0])
+        if first and first.lower() != name.lower():
+            terms.append(first)
+    return terms
+
+
+async def _run_nearby(reports, client, terms, anchor):
+    """Wikidata by name, accepted only near where the search pointed."""
+    point, reach = anchor
+    try:
+        for term in terms:
+            response = await client.get(
+                wikimedia.WIKIDATA_API, params=wikimedia.search_params(term)
+            )
+            response.raise_for_status()
+            qids = wikimedia.search_ids(response.json())
+            if not qids:
+                continue
+            response = await client.get(
+                wikimedia.WIKIDATA_API, params=wikimedia.entities_params(qids)
+            )
+            response.raise_for_status()
+            nearby = wikimedia.nearest_entity(response.json(), qids, point, reach)
+            if nearby:
+                reports.append(
+                    SourceReport(
+                        name="wikidata",
+                        status="used",
+                        reason=f"found by name, {round(nearby.metres)} m: "
+                        f"{nearby.label or nearby.qid}",
+                    )
+                )
+                return nearby
+    except (httpx.HTTPError, ValueError) as error:
+        reports.append(SourceReport(name="wikidata", status="failed", reason=type(error).__name__))
+        return None
+    reports.append(
+        SourceReport(name="wikidata", status="empty", reason="nothing nearby by that name")
+    )
+    return None
 
 
 async def _wikidata(client: httpx.AsyncClient, qid: str):

@@ -1,4 +1,4 @@
-from placescout.wikimedia import map_entity, map_imageinfo
+from placescout.wikimedia import map_entity, map_imageinfo, nearest_entity, search_ids
 
 
 def claim(value):
@@ -103,3 +103,76 @@ def test_photo_without_licence_metadata_is_skipped():
 
 def test_missing_file_is_skipped():
     assert map_imageinfo({"query": {"pages": {"-1": {"missing": ""}}}}) is None
+
+
+def located(qid, lat, lon, image=None, website=None):
+    claims = {"P625": [{"mainsnak": {"datavalue": {"value": {"latitude": lat, "longitude": lon}}}}]}
+    if image:
+        claims["P18"] = [claim(image)]
+    if website:
+        claims["P856"] = [claim(website)]
+    return {"claims": claims, "labels": {"en": {"value": f"label {qid}"}}}
+
+
+def test_name_search_takes_the_nearest_candidate_within_reach():
+    entities = {
+        "entities": {
+            "Q1": located("Q1", 45.0, 7.0, "far.jpg"),  # same name, another city
+            "Q2": located("Q2", 48.8720, 2.3316, "garnier.jpg", "https://www.operadeparis.fr/"),
+        }
+    }
+
+    found = nearest_entity(entities, ["Q1", "Q2"], anchor=(48.8714, 2.3320), max_metres=2000)
+
+    assert found.qid == "Q2"
+    assert found.entity.image_file == "garnier.jpg"
+    assert found.entity.website == "https://www.operadeparis.fr/"
+    assert found.label == "label Q2"
+    assert found.metres < 100
+
+
+def test_name_search_rejects_candidates_beyond_reach():
+    entities = {"entities": {"Q1": located("Q1", 48.90, 2.40, "x.jpg")}}
+
+    assert nearest_entity(entities, ["Q1"], anchor=(48.8714, 2.3320), max_metres=2000) is None
+
+
+def test_name_search_ignores_candidates_without_coordinates():
+    entities = {"entities": {"Q1": {"claims": {"P18": [claim("x.jpg")]}}}}
+
+    assert nearest_entity(entities, ["Q1"], anchor=(48.8714, 2.3320), max_metres=2000) is None
+
+
+def test_search_results_become_candidate_ids_in_order():
+    assert search_ids({"search": [{"id": "Q2"}, {"id": "Q1"}, {}]}) == ["Q2", "Q1"]
+
+
+def instance_of(*qids):
+    return [{"mainsnak": {"datavalue": {"value": {"id": q}}}} for q in qids]
+
+
+def test_a_station_is_recognised_as_a_transport_stop():
+    data = {"entities": {"Q800620": {"claims": {"P31": instance_of("Q55488", "Q1793804")}}}}
+
+    assert map_entity(data, "Q800620").transport_stop is True
+
+
+def test_a_park_is_not_a_transport_stop():
+    data = {"entities": {"Q217925": {"claims": {"P31": instance_of("Q22698")}}}}
+
+    assert map_entity(data, "Q217925").transport_stop is False
+
+
+def test_name_search_skips_transport_stops():
+    station = located("Q1", 48.8556, 2.2895, "rer.jpg")
+    station["claims"]["P31"] = instance_of("Q55488")
+    park = located("Q2", 48.8561, 2.2978, "park.jpg")
+
+    found = nearest_entity(
+        {"entities": {"Q1": station, "Q2": park}},
+        ["Q1", "Q2"],
+        anchor=(48.8556, 2.2895),
+        max_metres=2000,
+    )
+
+    assert found.qid == "Q2"
