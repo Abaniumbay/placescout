@@ -5,7 +5,7 @@ description = "Facts and photos about a place from open, storable sources, with 
 authors = [
     { name = "RaptoR", email = "amirreza.moghassemi@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.15"
 dependencies = [
     "extruct>=0.18.0",
     "fastapi>=0.162.5",
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.23,<0.13.0"]
+requires = ["uv_build>=0.13.8,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
