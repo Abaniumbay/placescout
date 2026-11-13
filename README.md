@@ -103,11 +103,11 @@ uv sync
 GEOAPIFY_API_KEY=… PLACESCOUT_CONTACT=you@example.org uv run uvicorn placescout.app:create_app --factory
 ```
 
-or
+or with the published image (tags: a release such as `0.1.0`, `main`, or `sha-…`):
 
 ```sh
-docker build -t placescout .
-docker run -p 8000:8000 -e GEOAPIFY_API_KEY=… -e PLACESCOUT_CONTACT=you@example.org placescout
+docker run -p 8000:8000 -e GEOAPIFY_API_KEY=… -e PLACESCOUT_CONTACT=you@example.org \
+  ghcr.io/abaniumbay/placescout:0.1.0
 ```
 
 | Variable | |
