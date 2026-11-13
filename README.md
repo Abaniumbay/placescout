@@ -59,9 +59,18 @@ At least one of `name`, `website` or `wikidata` is required.
 }
 ```
 
+**How a place is found:**
+1. **Clean the name.** Emoji, symbols and a trailing parenthetical are dropped: "🎭 Palais Garnier (Opéra)" is searched as "Palais Garnier".
+2. **Search Geoapify for `name, near`.**
+   - Strong results within 300 m of the best one count as the same place.
+   - Transport stops are never the venue.
+   - The match's name must share a word (4+ letters) with the name, or with the location minus its last part (the city).
+3. **If that is not one place**, and the location isn't relative ("near…", "→"), search the location alone. It often names the venue ("Palais Garnier, Place de l'Opéra, Paris").
+4. **Without a Wikidata id, or when the match turns out to be a station on Wikidata**, search Wikidata for the name, then for the location's first part. A candidate is accepted only if its coordinates are near where the search pointed: within 2 km of a venue or street, 15 km of a district or city. With no location there is no name search: a same-named place elsewhere must never match.
+
 **`match.confidence`** is one of:
 - `single`: one confident venue was found.
-- `ambiguous`: several venues fit, or none fits well. No search-based facts are returned, because a wrong venue's facts are worse than none.
+- `ambiguous`: several venues fit, or none fits well. No Geoapify facts are returned, because a wrong venue's facts are worse than none. A photo and website may still come from a Wikidata item found by name near the place; `sources` says so ("found by name, 116 m: Palais Garnier").
 - `none`: nothing was found.
 - `not_searched`: no `name` was given, there is no Geoapify key, or the search failed.
 
@@ -107,7 +116,7 @@ or with the published image (tags: a release such as `0.1.0`, `main`, or `sha-�
 
 ```sh
 docker run -p 8000:8000 -e GEOAPIFY_API_KEY=… -e PLACESCOUT_CONTACT=you@example.org \
-  ghcr.io/abaniumbay/placescout:0.1.0
+  ghcr.io/abaniumbay/placescout:0.2.0
 ```
 
 As a long-running service on a server, use [`deploy/compose.yaml`](deploy/compose.yaml). It listens only on localhost and docker0.

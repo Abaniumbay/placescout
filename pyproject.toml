@@ -1,6 +1,6 @@
 [project]
 name = "placescout"
-version = "0.1.0"
+version = "0.2.0"
 description = "Facts and photos about a place from open, storable sources, with source and licence on every field."
 authors = [
     { name = "RaptoR", email = "amirreza.moghassemi@gmail.com" }
