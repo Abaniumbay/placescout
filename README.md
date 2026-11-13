@@ -110,6 +110,8 @@ docker run -p 8000:8000 -e GEOAPIFY_API_KEY=… -e PLACESCOUT_CONTACT=you@exampl
   ghcr.io/abaniumbay/placescout:0.1.0
 ```
 
+As a long-running service on a server, use [`deploy/compose.yaml`](deploy/compose.yaml). It listens only on localhost and docker0.
+
 | Variable | |
 |---|---|
 | `GEOAPIFY_API_KEY` | Optional. Without it, searching by name is off; `website` and `wikidata` lookups still work. The free plan allows 3,000 requests a day for commercial use, with attribution. |
