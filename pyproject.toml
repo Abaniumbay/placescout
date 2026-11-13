@@ -1,0 +1,41 @@
+[project]
+name = "placescout"
+version = "0.1.0"
+description = "Facts and photos about a place from open, storable sources, with source and licence on every field."
+authors = [
+    { name = "RaptoR", email = "amirreza.moghassemi@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "extruct>=0.18.0",
+    "fastapi>=0.162.5",
+    "httpx>=0.28.1",
+    "protego>=0.7.0",
+    "trafilatura>=2.3.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "respx>=0.23.1",
+    "ruff>=0.17.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
